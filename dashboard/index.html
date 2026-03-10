@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Assistant — Latency Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --text:      #e2e4ed;
+      --muted:     #7b7f96;
+      --asr:       #3b82f6;
+      --first:     #22c55e;
+      --stream:    #14b8a6;
+      --tts:       #ef4444;
+      --overhead:  #6b7280;
+      --radius:    10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    header {
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #fff;
+    }
+    header p {
+      color: var(--muted);
+      margin-top: 0.25rem;
+      font-size: 0.85rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      max-width: 1000px;
+    }
+    .grid .full { grid-column: 1 / -1; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+    }
+    .card h2 {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1.25rem;
+    }
+
+    /* ── Bar chart ───────────────────────────────────────── */
+    .chart-wrap {
+      position: relative;
+      height: 90px;
+    }
+
+    /* ── Stats table ─────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 0 0 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    thead th:not(:first-child) { text-align: right; }
+    tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+    tbody td {
+      padding: 0.55rem 0;
+      font-variant-numeric: tabular-nums;
+    }
+    tbody td:not(:first-child) {
+      text-align: right;
+      color: var(--muted);
+    }
+    .dot {
+      display: inline-block;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .label-cell { display: flex; align-items: center; }
+    .total-row td { font-weight: 700; color: var(--text) !important; }
+    .total-row td:first-child { border-top: 1px solid var(--border); padding-top: 0.7rem; }
+
+    /* ── Total hero ──────────────────────────────────────── */
+    .hero-ms {
+      font-size: 2.8rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+      color: #fff;
+      line-height: 1;
+    }
+    .hero-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.4rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* ── Bottleneck ──────────────────────────────────────── */
+    .insight {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.9rem 1rem;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    .insight:last-child { margin-bottom: 0; }
+    .insight-icon { font-size: 1.1rem; margin-top: 1px; flex-shrink: 0; }
+    .insight strong { color: #fff; }
+    .rec { border-color: rgba(59,130,246,0.35); background: rgba(59,130,246,0.08); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Voice Assistant — Latency Dashboard</h1>
+  <p>End-to-end pipeline timing breakdown · ASR → LLM → TTS</p>
+</header>
+
+<div class="grid">
+
+  <!-- ── Stacked bar chart ─────────────────────────── -->
+  <div class="card full">
+    <h2>Pipeline Latency Breakdown</h2>
+    <div class="chart-wrap">
+      <canvas id="barChart"></canvas>
+    </div>
+  </div>
+
+  <!-- ── Stats table ───────────────────────────────── -->
+  <div class="card">
+    <h2>Component Timings</h2>
+    <table id="statsTable">
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Time (ms)</th>
+          <th>Share</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot></tfoot>
+    </table>
+  </div>
+
+  <!-- ── Total hero + bottleneck ───────────────────── -->
+  <div style="display:flex; flex-direction:column; gap:1.25rem;">
+
+    <div class="card" style="flex:0">
+      <h2>Total Pipeline Time</h2>
+      <div class="hero-ms" id="heroMs">—</div>
+      <div class="hero-label">milliseconds end-to-end</div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <h2>Bottleneck Analysis</h2>
+      <div id="insights"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+  // ─────────────────────────────────────────────────────────────
+  //  UPDATE THIS OBJECT with output from analyze_latency() to
+  //  refresh the dashboard with a new pipeline run's numbers.
+  // ─────────────────────────────────────────────────────────────
+  const LATENCY_DATA = {
+    asr_latency_ms:             2840,
+    llm_time_to_first_token_ms: 1055,
+    llm_total_streaming_ms:      697,
+    tts_latency_ms:             6338,
+    pipeline_overhead_ms:          0,
+    total_pipeline_ms:         10931,
+  };
+
+  // ── Component metadata ──────────────────────────────────────
+  const COMPONENTS = [
+    { key: "asr_latency_ms",             label: "ASR (Whisper)",    color: "#3b82f6" },
+    { key: "llm_time_to_first_token_ms", label: "LLM First Token",  color: "#22c55e" },
+    { key: "llm_total_streaming_ms",     label: "LLM Streaming",    color: "#14b8a6" },
+    { key: "tts_latency_ms",             label: "TTS Synthesis",    color: "#ef4444" },
+    { key: "pipeline_overhead_ms",       label: "Overhead",         color: "#6b7280" },
+  ];
+
+  const total = LATENCY_DATA.total_pipeline_ms;
+  const pct = v => total > 0 ? (v / total * 100).toFixed(1) : "0.0";
+
+  // ── Hero total ──────────────────────────────────────────────
+  document.getElementById("heroMs").textContent =
+    total.toLocaleString();
+
+  // ── Stats table ─────────────────────────────────────────────
+  const tbody = document.querySelector("#statsTable tbody");
+  const tfoot = document.querySelector("#statsTable tfoot");
+
+  COMPONENTS.forEach(({ key, label, color }) => {
+    const val = LATENCY_DATA[key];
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="label-cell">
+        <span class="dot" style="background:${color}"></span>${label}
+      </span></td>
+      <td>${val.toLocaleString()}</td>
+      <td>${pct(val)}%</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tfoot.innerHTML = `
+    <tr class="total-row">
+      <td>TOTAL</td>
+      <td>${total.toLocaleString()}</td>
+      <td>100%</td>
+    </tr>`;
+
+  // ── Stacked bar chart ────────────────────────────────────────
+  const ctx = document.getElementById("barChart").getContext("2d");
+
+  new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: [""],
+      datasets: COMPONENTS.map(({ label, key, color }) => ({
+        label,
+        data: [LATENCY_DATA[key]],
+        backgroundColor: color,
+        borderWidth: 0,
+        borderRadius: 0,
+      })),
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            color: "#7b7f96",
+            boxWidth: 12,
+            boxHeight: 12,
+            padding: 18,
+            font: { size: 12 },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx =>
+              ` ${ctx.dataset.label}: ${ctx.parsed.x.toLocaleString()}ms (${pct(ctx.parsed.x)}%)`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          display: false,
+        },
+        y: {
+          stacked: true,
+          display: false,
+        },
+      },
+    },
+  });
+
+  // ── Bottleneck analysis ──────────────────────────────────────
+  const sorted = [...COMPONENTS]
+    .map(c => ({ ...c, ms: LATENCY_DATA[c.key] }))
+    .filter(c => c.ms > 0)
+    .sort((a, b) => b.ms - a.ms);
+
+  const top1 = sorted[0];
+  const top2 = sorted[1];
+  const top2Combined = top1.ms + (top2 ? top2.ms : 0);
+
+  const insights = document.getElementById("insights");
+
+  insights.innerHTML = `
+    <div class="insight">
+      <span class="insight-icon">🔴</span>
+      <span>
+        <strong>${top1.label}</strong> is the bottleneck at
+        <strong>${top1.ms.toLocaleString()}ms</strong>
+        — ${pct(top1.ms)}% of total pipeline time.
+      </span>
+    </div>
+    <div class="insight">
+      <span class="insight-icon">📊</span>
+      <span>
+        The top 2 components (<strong>${top1.label}</strong> +
+        <strong>${top2 ? top2.label : "—"}</strong>) account for
+        <strong>${pct(top2Combined)}%</strong> of total latency
+        (${top2Combined.toLocaleString()}ms of ${total.toLocaleString()}ms).
+      </span>
+    </div>
+    <div class="insight rec">
+      <span class="insight-icon">💡</span>
+      <span>
+        <strong>Recommendation:</strong> To improve total latency, focus on
+        <strong>${top1.label}</strong>. Consider
+        ${top1.key === "tts_latency_ms"
+          ? "streaming TTS playback while audio is still generating, or switching to a lower-latency TTS provider."
+          : top1.key === "asr_latency_ms"
+          ? "chunked streaming ASR so transcription begins before the clip finishes recording."
+          : top1.key === "llm_time_to_first_token_ms"
+          ? "a smaller or quantized model to reduce prefill latency."
+          : top1.key === "llm_total_streaming_ms"
+          ? "reducing max_tokens or using a faster model variant."
+          : "profiling this stage for I/O or scheduling delays."
+        }
+      </span>
+    </div>
+  `;
+</script>
+
+</body>
+</html>
