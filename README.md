@@ -1,3 +1,14 @@
+---
+title: Voice Assistant Real-Time AI Pipeline
+emoji: 🎙️
+colorFrom: blue
+colorTo: red
+sdk: streamlit
+sdk_version: 1.32.0
+app_file: app.py
+pinned: false
+---
+
 # Voice Assistant — Real-Time Multimodal AI Pipeline
 
 A real-time voice assistant pipeline built in Python demonstrating end-to-end streaming AI architecture, latency decomposition, resilience engineering, and deterministic replay debugging.
