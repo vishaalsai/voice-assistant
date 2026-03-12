@@ -17,6 +17,12 @@ A real-time voice assistant pipeline built in Python demonstrating end-to-end st
 Audio Input → ASR (Whisper) → LLM (Claude Haiku) → TTS (OpenAI) → Audio Output
 ```
 
+## Quick Reference
+
+| | |
+|---|---|
+| Live Demo | huggingface.co/spaces/vishaalsai29/voice-assistant |
+
 ---
 
 ## Architecture
